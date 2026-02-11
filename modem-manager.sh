@@ -284,7 +284,7 @@ change_pin() {
     [ "$NEW_PIN" != "$NEW_PIN2" ] && echo -e "${RED}[ERROR] PINs don't match${NC}" && read -p "Press Enter..." && return 1
     
     echo -e "${BLUE}[*] Changing PIN...${NC}"
-    if sudo mmcli -i "$SIM" --change-pin="$OLD_PIN,$NEW_PIN"; then
+    if sudo mmcli -i "$SIM" --pin="$OLD_PIN" --change-pin="$NEW_PIN"; then
         echo -e "${GREEN}[OK] PIN changed successfully${NC}"
     else
         echo -e "${RED}[ERROR] Failed to change PIN${NC}"
