@@ -342,18 +342,26 @@ store_pin() {
     echo "╚════════════════════════════════════╝"
     
     CONNECTION=$(select_connection)
-    [ -z "$CONNECTION" ] && read -p "Press Enter..." && return 1
+    if [ -z "$CONNECTION" ]; then
+        echo -e "${YELLOW}[!] No GSM connection found. Create one first (option 13)${NC}"
+        read -p "Press Enter..."
+        return 1
+    fi
     
-    echo -e "${YELLOW}[!] PIN will be stored in NetworkManager${NC}"
+    echo -e "${YELLOW}[!] PIN will be stored securely in NetworkManager${NC}"
+    echo -e "${YELLOW}[!] System will auto-unlock SIM on boot${NC}"
     read -sp "Enter PIN: " PIN
     echo ""
     
-    echo -e "${BLUE}[*] Storing PIN...${NC}"
-    if sudo nmcli connection modify "$CONNECTION" gsm.pin "$PIN"; then
-        echo -e "${GREEN}[OK] PIN stored in connection '$CONNECTION'${NC}"
+    echo -e "${BLUE}[*] Storing PIN in connection...${NC}"
+    if sudo nmcli connection modify "$CONNECTION" gsm.pin "$PIN" && \
+       sudo nmcli connection modify "$CONNECTION" connection.autoconnect yes; then
+        echo -e "${GREEN}[OK] PIN stored securely${NC}"
+        echo -e "${GREEN}[OK] SIM will auto-unlock on boot${NC}"
     else
         echo -e "${RED}[ERROR] Failed to store PIN${NC}"
     fi
+    
     read -p "Press Enter..."
 }
 
@@ -388,6 +396,71 @@ create_connection() {
     
     echo -e "${GREEN}[OK] Connection '$NAME' created${NC}"
     read -p "Press Enter..."
+}
+
+delete_connection() {
+    clear
+    echo "╔════════════════════════════════════╗"
+    echo "║      DELETE GSM CONNECTION         ║"
+    echo "╚════════════════════════════════════╝"
+    
+    CONNECTION=$(select_connection)
+    [ -z "$CONNECTION" ] && read -p "Press Enter..." && return 1
+    
+    read -p "Delete '$CONNECTION'? (yes/no): " CONFIRM
+    [ "$CONFIRM" != "yes" ] && echo "Cancelled" && read -p "Press Enter..." && return 0
+    
+    echo -e "${BLUE}[*] Deleting connection...${NC}"
+    if sudo nmcli connection delete "$CONNECTION"; then
+        echo -e "${GREEN}[OK] Connection deleted${NC}"
+    else
+        echo -e "${RED}[ERROR] Failed to delete${NC}"
+    fi
+    read -p "Press Enter..."
+}
+
+modify_connection() {
+    clear
+    echo "╔════════════════════════════════════╗"
+    echo "║      MODIFY GSM CONNECTION         ║"
+    echo "╚════════════════════════════════════╝"
+    
+    CONNECTION=$(select_connection)
+    [ -z "$CONNECTION" ] && read -p "Press Enter..." && return 1
+    
+    read -p "New APN (press Enter to skip): " APN
+    read -p "New PIN (press Enter to skip): " PIN
+    
+    echo -e "${BLUE}[*] Modifying connection...${NC}"
+    [ -n "$APN" ] && sudo nmcli connection modify "$CONNECTION" gsm.apn "$APN"
+    [ -n "$PIN" ] && sudo nmcli connection modify "$CONNECTION" gsm.pin "$PIN"
+    
+    echo -e "${GREEN}[OK] Connection modified${NC}"
+    read -p "Press Enter..."
+}
+
+connection_menu() {
+    while true; do
+        clear
+        echo "╔════════════════════════════════════╗"
+        echo "║     CONNECTION MANAGEMENT          ║"
+        echo "╚════════════════════════════════════╝"
+        echo ""
+        echo "  1) Create Connection"
+        echo "  2) Delete Connection"
+        echo "  3) Modify Connection"
+        echo "  0) Back to Main Menu"
+        echo ""
+        read -p "Select option: " choice
+        
+        case $choice in
+            1) create_connection ;;
+            2) delete_connection ;;
+            3) modify_connection ;;
+            0) return ;;
+            *) echo -e "${RED}[ERROR] Invalid option${NC}"; sleep 1 ;;
+        esac
+    done
 }
 
 switch_sim_slot() {
@@ -541,7 +614,7 @@ show_menu() {
     echo " 10) Disable PIN"
     echo " 11) Enable PIN"
     echo " 12) Store PIN in Connection"
-    echo " 13) Create Connection"
+    echo " 13) Connection Management"
     echo " 14) Switch SIM Slot"
     echo " 15) eSIM Management"
     echo "  0) Exit"
@@ -561,7 +634,7 @@ show_menu() {
         10) disable_pin ;;
         11) enable_pin ;;
         12) store_pin ;;
-        13) create_connection ;;
+        13) connection_menu ;;
         14) switch_sim_slot ;;
         15) esim_menu ;;
         0) clear; exit 0 ;;
