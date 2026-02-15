@@ -292,6 +292,71 @@ change_pin() {
     read -p "Press Enter..."
 }
 
+disable_pin() {
+    clear
+    echo "╔════════════════════════════════════╗"
+    echo "║         DISABLE PIN CODE           ║"
+    echo "╚════════════════════════════════════╝"
+    
+    SIM=$(get_sim_id)
+    [ -z "$SIM" ] && echo -e "${RED}[ERROR] No SIM found${NC}" && read -p "Press Enter..." && return 1
+    
+    echo -e "${YELLOW}[!] This will disable PIN requirement on boot${NC}"
+    read -sp "Enter current PIN: " PIN
+    echo ""
+    
+    echo -e "${BLUE}[*] Disabling PIN...${NC}"
+    if sudo mmcli -i "$SIM" --disable-pin="$PIN"; then
+        echo -e "${GREEN}[OK] PIN disabled${NC}"
+    else
+        echo -e "${RED}[ERROR] Failed to disable PIN${NC}"
+    fi
+    read -p "Press Enter..."
+}
+
+enable_pin() {
+    clear
+    echo "╔════════════════════════════════════╗"
+    echo "║         ENABLE PIN CODE            ║"
+    echo "╚════════════════════════════════════╝"
+    
+    SIM=$(get_sim_id)
+    [ -z "$SIM" ] && echo -e "${RED}[ERROR] No SIM found${NC}" && read -p "Press Enter..." && return 1
+    
+    read -sp "Enter PIN: " PIN
+    echo ""
+    
+    echo -e "${BLUE}[*] Enabling PIN...${NC}"
+    if sudo mmcli -i "$SIM" --enable-pin="$PIN"; then
+        echo -e "${GREEN}[OK] PIN enabled${NC}"
+    else
+        echo -e "${RED}[ERROR] Failed to enable PIN${NC}"
+    fi
+    read -p "Press Enter..."
+}
+
+store_pin() {
+    clear
+    echo "╔════════════════════════════════════╗"
+    echo "║      STORE PIN IN CONNECTION       ║"
+    echo "╚════════════════════════════════════╝"
+    
+    CONNECTION=$(select_connection)
+    [ -z "$CONNECTION" ] && read -p "Press Enter..." && return 1
+    
+    echo -e "${YELLOW}[!] PIN will be stored in NetworkManager${NC}"
+    read -sp "Enter PIN: " PIN
+    echo ""
+    
+    echo -e "${BLUE}[*] Storing PIN...${NC}"
+    if sudo nmcli connection modify "$CONNECTION" gsm.pin "$PIN"; then
+        echo -e "${GREEN}[OK] PIN stored in connection '$CONNECTION'${NC}"
+    else
+        echo -e "${RED}[ERROR] Failed to store PIN${NC}"
+    fi
+    read -p "Press Enter..."
+}
+
 show_siminfo() {
     clear
     echo "╔════════════════════════════════════╗"
@@ -473,9 +538,12 @@ show_menu() {
     echo "  7) Unlock PIN"
     echo "  8) Unlock PUK"
     echo "  9) Change PIN"
-    echo " 10) Create Connection"
-    echo " 11) Switch SIM Slot"
-    echo " 12) eSIM Management"
+    echo " 10) Disable PIN"
+    echo " 11) Enable PIN"
+    echo " 12) Store PIN in Connection"
+    echo " 13) Create Connection"
+    echo " 14) Switch SIM Slot"
+    echo " 15) eSIM Management"
     echo "  0) Exit"
     echo ""
     read -p "Select option: " choice
@@ -490,9 +558,12 @@ show_menu() {
         7) unlock_pin ;;
         8) unlock_puk ;;
         9) change_pin ;;
-        10) create_connection ;;
-        11) switch_sim_slot ;;
-        12) esim_menu ;;
+        10) disable_pin ;;
+        11) enable_pin ;;
+        12) store_pin ;;
+        13) create_connection ;;
+        14) switch_sim_slot ;;
+        15) esim_menu ;;
         0) clear; exit 0 ;;
         *) echo -e "${RED}[ERROR] Invalid option${NC}"; sleep 1 ;;
     esac

@@ -2,6 +2,9 @@
 
 Interactive bash tool for managing GSM/LTE/eSIM modems on Linux.
 
+<img width="1471" height="1056" alt="modemmanager" src="https://github.com/user-attachments/assets/fa8ddcd4-f7d7-493d-be73-951b87ed98ff" />
+
+
 ## Features
 
 - Connect/disconnect mobile modem
