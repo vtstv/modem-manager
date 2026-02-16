@@ -2,7 +2,7 @@
 
 Interactive bash tool for managing GSM/LTE/eSIM modems on Linux.
 
-<img width="1471" height="1056" alt="modemmanager" src="https://github.com/user-attachments/assets/fa8ddcd4-f7d7-493d-be73-951b87ed98ff" />
+<img width="1450" height="1059" alt="modemmanager" src="https://github.com/user-attachments/assets/a1362d27-7170-4529-aa18-c3372779dcda" />
 
 ## Features
 
@@ -55,28 +55,9 @@ Dependencies will be automatically installed on first run if missing.
 
 ## Usage
 
-### Main Menu Options
-
-1. **Connect (Up)** - Enable modem and connect to network
-2. **Disconnect (Down)** - Disconnect and disable modem
-3. **Restart Modem** - Full modem restart
-4. **Show Signal** - Display signal strength and network info
-5. **Full Diagnostics** - Complete system diagnostics
-6. **SIM Information** - View detailed SIM card info
-7. **Unlock PIN** - Manually unlock SIM with PIN
-8. **Unlock PUK** - Unlock SIM with PUK code
-9. **Change PIN** - Change SIM PIN code
-10. **Disable PIN** - Disable PIN requirement
-11. **Enable PIN** - Enable PIN protection
-12. **Store PIN in Connection** - Save PIN in NetworkManager
-13. **Connection Management** - Create/modify/delete connections
-14. **Switch SIM Slot** - Switch between physical SIM and eSIM
-15. **eSIM Management** - Manage eSIM profiles
-16. **SIM Unlock Service** - Configure automatic encrypted unlock
-
 
 ```bash
-# From menu option 16:
+# From Auto Unlock Service menu:
 1) Install   - Set up automatic unlock with encrypted PIN
 2) Uninstall - Remove the service
 3) Status    - Check service status and logs
@@ -90,8 +71,7 @@ Dependencies will be automatically installed on first run if missing.
 
 ## Version
 
-**v1.2** - Added automatic SIM unlock service with encrypted credentials
-**v1.1** - Added Create/modify/delete connections
+**v1.2** - Reorganized menu structure, added automatic SIM unlock with encrypted credentials
 
 
 ## License

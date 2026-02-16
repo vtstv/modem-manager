@@ -805,22 +805,23 @@ show_menu() {
     echo "║     MOBILE MODEM MANAGER           ║"
     echo "╚════════════════════════════════════╝"
     echo ""
+    echo "  CONNECTION"
     echo "  1) Connect (Up)"
     echo "  2) Disconnect (Down)"
     echo "  3) Restart Modem"
     echo "  4) Show Signal"
     echo "  5) Full Diagnostics"
+    echo ""
+    echo "  SIM MANAGEMENT"
     echo "  6) SIM Information"
-    echo "  7) Unlock PIN"
-    echo "  8) Unlock PUK"
-    echo "  9) Change PIN"
-    echo " 10) Disable PIN"
-    echo " 11) Enable PIN"
-    echo " 12) Store PIN in Connection"
-    echo " 13) Connection Management"
-    echo " 14) Switch SIM Slot"
-    echo " 15) eSIM Management"
-    echo " 16) SIM Unlock Service"
+    echo "  7) SIM PIN/PUK Management"
+    echo "  8) Switch SIM Slot"
+    echo "  9) Auto Unlock Service"
+    echo ""
+    echo "  ADVANCED"
+    echo " 10) Connection Management"
+    echo " 11) eSIM Management"
+    echo ""
     echo "  0) Exit"
     echo ""
     read -p "Select option: " choice
@@ -832,19 +833,44 @@ show_menu() {
         4) show_signal ;;
         5) show_diag ;;
         6) show_siminfo ;;
-        7) unlock_pin ;;
-        8) unlock_puk ;;
-        9) change_pin ;;
-        10) disable_pin ;;
-        11) enable_pin ;;
-        12) store_pin ;;
-        13) connection_menu ;;
-        14) switch_sim_slot ;;
-        15) esim_menu ;;
-        16) unlock_service_menu ;;
+        7) sim_pin_menu ;;
+        8) switch_sim_slot ;;
+        9) unlock_service_menu ;;
+        10) connection_menu ;;
+        11) esim_menu ;;
         0) clear; exit 0 ;;
         *) echo -e "${RED}[ERROR] Invalid option${NC}"; sleep 1 ;;
     esac
+}
+
+sim_pin_menu() {
+    while true; do
+        clear
+        echo "╔════════════════════════════════════╗"
+        echo "║      SIM PIN/PUK MANAGEMENT        ║"
+        echo "╚════════════════════════════════════╝"
+        echo ""
+        echo "  1) Unlock PIN"
+        echo "  2) Unlock PUK"
+        echo "  3) Change PIN"
+        echo "  4) Enable PIN"
+        echo "  5) Disable PIN"
+        echo "  6) Store PIN in Connection"
+        echo "  0) Back"
+        echo ""
+        read -p "Select option: " choice
+        
+        case $choice in
+            1) unlock_pin ;;
+            2) unlock_puk ;;
+            3) change_pin ;;
+            4) enable_pin ;;
+            5) disable_pin ;;
+            6) store_pin ;;
+            0) break ;;
+            *) echo -e "${RED}[ERROR] Invalid option${NC}"; sleep 1 ;;
+        esac
+    done
 }
 
 # Check dependencies on startup
