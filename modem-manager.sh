@@ -8,10 +8,13 @@
 # ╚═╝     ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝╚═╝     ╚═╝    ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝
 #
 # Mobile Modem Manager - Interactive GSM/LTE/eSIM Management Tool
+# Version: 1.2
 # Author: Murr
 # GitHub: https://github.com/vtstv
 # License: MIT
 #
+
+VERSION="1.2"
 
 # Colors
 RED='\033[0;31m'
@@ -24,7 +27,7 @@ NC='\033[0m'
 show_copyright() {
     clear
     echo -e "${CYAN}╔════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${NC}  Mobile Modem Manager v1.0 - GSM/LTE/eSIM Management    ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  Mobile Modem Manager v${VERSION} - GSM/LTE/eSIM Management    ${CYAN}║${NC}"
     echo -e "${CYAN}║${NC}  Author: Murr | GitHub: github.com/vtstv | MIT License  ${CYAN}║${NC}"
     echo -e "${CYAN}╚════════════════════════════════════════════════════════════╝${NC}"
     echo ""
@@ -593,9 +596,209 @@ esim_menu() {
     done
 }
 
+# Automatic SIM unlock service functions
+log_info() { echo -e "${BLUE}[*]${NC} $*"; }
+log_ok() { echo -e "${GREEN}[✓]${NC} $*"; }
+log_warn() { echo -e "${YELLOW}[!]${NC} $*"; }
+log_error() { echo -e "${RED}[✗]${NC} $*"; }
+
+unlock_service_status() {
+    clear
+    echo "╔════════════════════════════════════╗"
+    echo "║   AUTO UNLOCK SERVICE STATUS       ║"
+    echo "╚════════════════════════════════════╝"
+    echo ""
+    
+    local service_file="/etc/systemd/system/unlock-sim.service"
+    local cred_file="/etc/systemd/credentials/sim-pin.cred"
+    
+    [ -f "$service_file" ] && log_ok "Service file exists" || log_error "Service file missing"
+    [ -f "$cred_file" ] && log_ok "Encrypted credential exists" || log_warn "Credential in runtime (normal)"
+    systemctl is-enabled unlock-sim.service &>/dev/null && log_ok "Service enabled" || log_warn "Service not enabled"
+    
+    if systemctl is-active unlock-sim.service &>/dev/null; then
+        log_ok "Service active"
+    elif systemctl is-failed unlock-sim.service &>/dev/null; then
+        log_warn "Service failed (check logs below)"
+    else
+        log_warn "Service not active"
+    fi
+    
+    echo ""
+    echo "Recent logs:"
+    sudo journalctl -u unlock-sim.service -n 5 --no-pager 2>/dev/null | tail -3
+    
+    echo ""
+    read -p "Press Enter..."
+}
+
+install_unlock_service() {
+    clear
+    echo "╔════════════════════════════════════╗"
+    echo "║   INSTALL AUTO UNLOCK SERVICE      ║"
+    echo "╚════════════════════════════════════╝"
+    echo ""
+    
+    local missing=()
+    command -v mmcli >/dev/null 2>&1 || missing+=("mmcli")
+    command -v systemd-creds >/dev/null 2>&1 || missing+=("systemd (systemd-creds)")
+    command -v systemctl >/dev/null 2>&1 || missing+=("systemctl")
+    
+    if [ ${#missing[@]} -gt 0 ]; then
+        log_error "Missing dependencies: ${missing[*]}"
+        read -p "Press Enter..."
+        return 1
+    fi
+    
+    log_info "Detecting modem..."
+    local modem_id
+    modem_id=$(mmcli -L 2>/dev/null | grep -oP '/Modem/\K[0-9]+' | head -1)
+    
+    if [ -z "$modem_id" ]; then
+        log_error "No modem found"
+        read -p "Press Enter..."
+        return 1
+    fi
+    log_ok "Found modem: $modem_id"
+    
+    if [ -f "/etc/systemd/system/unlock-sim.service" ]; then
+        log_warn "Service already exists"
+        read -p "Overwrite? (y/N): " overwrite
+        [ "$overwrite" != "y" ] && return 0
+    fi
+    
+    echo ""
+    local pin pin2
+    read -sp "Enter SIM PIN: " pin
+    echo ""
+    read -sp "Confirm PIN: " pin2
+    echo ""
+    
+    if [ "$pin" != "$pin2" ]; then
+        log_error "PINs don't match"
+        read -p "Press Enter..."
+        return 1
+    fi
+    
+    if [ -z "$pin" ]; then
+        log_error "PIN cannot be empty"
+        read -p "Press Enter..."
+        return 1
+    fi
+    
+    log_info "Creating credentials directory..."
+    sudo mkdir -p /etc/systemd/credentials
+    sudo chmod 700 /etc/systemd/credentials
+    
+    log_info "Encrypting PIN..."
+    if ! echo -n "$pin" | sudo systemd-creds encrypt --name=sim_pin - /etc/systemd/credentials/sim-pin.cred 2>/dev/null; then
+        log_error "Failed to encrypt PIN"
+        pin=""
+        read -p "Press Enter..."
+        return 1
+    fi
+    pin=""
+    
+    sudo chmod 600 /etc/systemd/credentials/sim-pin.cred
+    log_ok "PIN encrypted"
+    
+    log_info "Creating systemd service..."
+    sudo tee /etc/systemd/system/unlock-sim.service >/dev/null <<'EOF'
+[Unit]
+Description=Automatic SIM PIN Unlock
+After=ModemManager.service
+Requires=ModemManager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+LoadCredentialEncrypted=sim_pin:/etc/systemd/credentials/sim-pin.cred
+ExecStart=/bin/bash -c 'sleep 5; MODEM=$(mmcli -L 2>/dev/null | grep -oP "/Modem/\\K[0-9]+" | head -1); [ -n "$MODEM" ] && SIM=$(mmcli -m $MODEM 2>/dev/null | grep -oP "primary sim path: /org/freedesktop/ModemManager1/SIM/\\K[0-9]+"); [ -n "$SIM" ] && mmcli -i $SIM --pin="$(cat ${CREDENTIALS_DIRECTORY}/sim_pin)"; sleep 2; [ -n "$MODEM" ] && mmcli -m $MODEM -e || true'
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    sudo chmod 644 /etc/systemd/system/unlock-sim.service
+    
+    log_info "Enabling service..."
+    sudo systemctl daemon-reload
+    
+    if ! sudo systemctl enable unlock-sim.service; then
+        log_error "Failed to enable service"
+        read -p "Press Enter..."
+        return 1
+    fi
+    
+    log_ok "Service installed and enabled"
+    echo ""
+    log_info "Service will run automatically on boot"
+    log_info "To test now: sudo systemctl start unlock-sim.service"
+    echo ""
+    read -p "Press Enter..."
+}
+
+uninstall_unlock_service() {
+    clear
+    echo "╔════════════════════════════════════╗"
+    echo "║  UNINSTALL AUTO UNLOCK SERVICE     ║"
+    echo "╚════════════════════════════════════╝"
+    echo ""
+    
+    if [ ! -f "/etc/systemd/system/unlock-sim.service" ]; then
+        log_warn "Service not installed"
+        read -p "Press Enter..."
+        return 0
+    fi
+    
+    read -p "Remove auto unlock service? (y/N): " confirm
+    [ "$confirm" != "y" ] && return 0
+    
+    log_info "Stopping service..."
+    sudo systemctl stop unlock-sim.service 2>/dev/null || true
+    
+    log_info "Disabling service..."
+    sudo systemctl disable unlock-sim.service 2>/dev/null || true
+    
+    log_info "Removing files..."
+    sudo rm -f /etc/systemd/system/unlock-sim.service
+    sudo rm -f /etc/systemd/credentials/sim-pin.cred
+    
+    log_info "Reloading systemd..."
+    sudo systemctl daemon-reload
+    
+    log_ok "Service uninstalled"
+    echo ""
+    read -p "Press Enter..."
+}
+
+unlock_service_menu() {
+    while true; do
+        clear
+        echo "╔════════════════════════════════════╗"
+        echo "║   AUTOMATIC SIM UNLOCK (ENCRYPTED) ║"
+        echo "╚════════════════════════════════════╝"
+        echo ""
+        echo "  1) Install"
+        echo "  2) Uninstall"
+        echo "  3) Status"
+        echo "  0) Back"
+        echo ""
+        read -p "Select option: " choice
+        
+        case $choice in
+            1) install_unlock_service ;;
+            2) uninstall_unlock_service ;;
+            3) unlock_service_status ;;
+            0) break ;;
+            *) echo -e "${RED}Invalid option${NC}"; sleep 1 ;;
+        esac
+    done
+}
+
 show_menu() {
     clear
-    echo -e "${CYAN}Mobile Modem Manager v1.0${NC} | ${CYAN}Murr${NC} @ ${CYAN}github.com/vtstv${NC}"
+    echo -e "${CYAN}Mobile Modem Manager v${VERSION}${NC} | ${CYAN}Murr${NC} @ ${CYAN}github.com/vtstv${NC}"
     echo ""
     show_status
     echo "╔════════════════════════════════════╗"
@@ -617,6 +820,7 @@ show_menu() {
     echo " 13) Connection Management"
     echo " 14) Switch SIM Slot"
     echo " 15) eSIM Management"
+    echo " 16) SIM Unlock Service"
     echo "  0) Exit"
     echo ""
     read -p "Select option: " choice
@@ -637,6 +841,7 @@ show_menu() {
         13) connection_menu ;;
         14) switch_sim_slot ;;
         15) esim_menu ;;
+        16) unlock_service_menu ;;
         0) clear; exit 0 ;;
         *) echo -e "${RED}[ERROR] Invalid option${NC}"; sleep 1 ;;
     esac
