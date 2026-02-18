@@ -32,6 +32,13 @@ Interactive bash tool for managing GSM/LTE/eSIM modems on Linux.
 - Secure credential management (no plain-text PIN)
 - Easy install/uninstall/status management
 
+### FCC Unlock (Qualcomm/Intel Modems)
+- Automatic detection of FCC-locked modems (Quectel EM120, Foxconn SDX55, Fibocom L860)
+- Check FCC lock status and modem state
+- Enable/disable FCC unlock scripts for ModemManager
+- Auto-detect device VID:PID and match unlock scripts
+- Required for RF functionality on certain Lenovo ThinkPad WWAN modules
+
 ### Dependency Management
 - Automatically detects missing dependencies on startup
 - Identifies your Linux distribution and package manager
@@ -79,6 +86,8 @@ On first run, if any dependencies are missing the script will:
 - Automatic unlock on every boot
 
 ## Version
+
+**v1.3** - Added FCC unlock management for Qualcomm/Intel modems (EM120, SDX55, L860) with automatic detection and unlock script configuration
 
 **v1.2** - Reorganized menu structure, added automatic SIM unlock with encrypted credentials, expanded distro support (Fedora/RHEL, openSUSE), user-confirmed dependency installation
 

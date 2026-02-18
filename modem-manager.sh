@@ -6,7 +6,7 @@
 # License: MIT
 #
 
-VERSION="1.2"
+VERSION="1.3"
 
 # Colors
 RED='\033[0;31m'
@@ -1052,6 +1052,343 @@ unlock_service_menu() {
     done
 }
 
+# FCC Unlock Management
+check_fcc_lock_status() {
+    clear
+    echo "╔════════════════════════════════════╗"
+    echo "║      FCC UNLOCK STATUS             ║"
+    echo "╚════════════════════════════════════╝"
+    echo ""
+    
+    local modem_id
+    modem_id=$(get_modem_id)
+    
+    if [ -z "$modem_id" ]; then
+        log_error "No modem found"
+        read -p "Press Enter..."
+        return 1
+    fi
+    
+    log_info "Detecting modem hardware..."
+    local modem_info
+    modem_info=$(mmcli -m "$modem_id" 2>/dev/null)
+    
+    # Extract manufacturer and model
+    local manufacturer model
+    manufacturer=$(echo "$modem_info" | grep -oP "manufacturer: '\K[^']+")
+    model=$(echo "$modem_info" | grep -oP "model: '\K[^']+")
+    
+    echo "  Manufacturer: ${manufacturer:-Unknown}"
+    echo "  Model: ${model:-Unknown}"
+    echo ""
+    
+    # Get PCI device ID (VID:PID)
+    local vid_pid
+    vid_pid=$(lspci -nn 2>/dev/null | grep -i "wireless\|wwan\|mobile" | grep -oP '\[([0-9a-f]{4}:[0-9a-f]{4})\]' | tr -d '[]' | head -1)
+    
+    if [ -n "$vid_pid" ]; then
+        log_ok "Device ID: $vid_pid"
+    else
+        log_warn "Could not detect device ID"
+        vid_pid=""
+    fi
+    echo ""
+    
+    # Check if FCC unlock is needed (Qualcomm-based modems)
+    local needs_fcc=false
+    if echo "$manufacturer $model" | grep -qiE "quectel|foxconn|fibocom"; then
+        if echo "$model" | grep -qiE "em120|sdx55|l860"; then
+            needs_fcc=true
+        fi
+    fi
+    
+    if [ "$needs_fcc" = true ]; then
+        log_warn "This modem may require FCC unlock"
+        echo "  Common models needing FCC unlock:"
+        echo "    - Quectel EM120 (Qualcomm)"
+        echo "    - Foxconn SDX55 (Qualcomm)"
+        echo "    - Fibocom L860 (Intel)"
+    else
+        log_ok "This modem likely does not require FCC unlock"
+    fi
+    echo ""
+    
+    # Check if unlock scripts are available
+    log_info "Checking for available FCC unlock scripts..."
+    local available_dir="/usr/share/ModemManager/fcc-unlock.available.d"
+    local enabled_dir="/etc/ModemManager/fcc-unlock.d"
+    
+    if [ ! -d "$available_dir" ]; then
+        log_error "ModemManager FCC unlock scripts not found"
+        echo "  Install ModemManager 1.16.6 or newer"
+        read -p "Press Enter..."
+        return 1
+    fi
+    
+    local available_scripts
+    available_scripts=$(ls "$available_dir" 2>/dev/null | wc -l)
+    
+    if [ "$available_scripts" -eq 0 ]; then
+        log_warn "No FCC unlock scripts available"
+    else
+        log_ok "Found $available_scripts unlock script(s)"
+        echo ""
+        echo "  Available unlock scripts:"
+        ls -1 "$available_dir" 2>/dev/null | sed 's/^/    /'
+    fi
+    echo ""
+    
+    # Check if unlock is enabled
+    if [ -d "$enabled_dir" ]; then
+        local enabled_scripts
+        enabled_scripts=$(ls "$enabled_dir" 2>/dev/null | wc -l)
+        
+        if [ "$enabled_scripts" -gt 0 ]; then
+            log_ok "FCC unlock enabled for $enabled_scripts device(s)"
+            echo ""
+            echo "  Enabled unlock scripts:"
+            ls -1 "$enabled_dir" 2>/dev/null | sed 's/^/    /'
+        else
+            log_warn "FCC unlock not enabled (no symlinks in $enabled_dir)"
+        fi
+    else
+        log_warn "FCC unlock directory not found: $enabled_dir"
+    fi
+    
+    echo ""
+    
+    # Check modem state
+    log_info "Checking modem state..."
+    local state
+    state=$(echo "$modem_info" | grep -oP "state: '\K[^']+")
+    echo "  State: ${state:-Unknown}"
+    
+    if echo "$state" | grep -qiE "disabled|locked"; then
+        log_warn "Modem is not in online mode"
+        echo "  This could indicate FCC lock is active"
+    elif echo "$state" | grep -qiE "registered|connected"; then
+        log_ok "Modem is operational (FCC unlock not needed or already done)"
+    fi
+    
+    echo ""
+    read -p "Press Enter..."
+}
+
+enable_fcc_unlock() {
+    clear
+    echo "╔════════════════════════════════════╗"
+    echo "║      ENABLE FCC UNLOCK             ║"
+    echo "╚════════════════════════════════════╝"
+    echo ""
+    
+    local available_dir="/usr/share/ModemManager/fcc-unlock.available.d"
+    local enabled_dir="/etc/ModemManager/fcc-unlock.d"
+    
+    # Check if available scripts exist
+    if [ ! -d "$available_dir" ]; then
+        log_error "ModemManager FCC unlock scripts not found"
+        echo "  Install ModemManager 1.16.6 or newer"
+        read -p "Press Enter..."
+        return 1
+    fi
+    
+    local scripts=()
+    while IFS= read -r script; do
+        scripts+=("$script")
+    done < <(ls "$available_dir" 2>/dev/null)
+    
+    if [ ${#scripts[@]} -eq 0 ]; then
+        log_error "No FCC unlock scripts available"
+        read -p "Press Enter..."
+        return 1
+    fi
+    
+    # Try to auto-detect device
+    log_info "Detecting your modem..."
+    local vid_pid
+    vid_pid=$(lspci -nn 2>/dev/null | grep -i "wireless\|wwan\|mobile" | grep -oP '\[([0-9a-f]{4}:[0-9a-f]{4})\]' | tr -d '[]' | head -1)
+    
+    if [ -n "$vid_pid" ]; then
+        log_ok "Detected device: $vid_pid"
+        echo ""
+        
+        # Check if matching script exists
+        local matching_script=""
+        for script in "${scripts[@]}"; do
+            if [[ "$script" == "$vid_pid"* ]]; then
+                matching_script="$script"
+                break
+            fi
+        done
+        
+        if [ -n "$matching_script" ]; then
+            log_ok "Found matching unlock script: $matching_script"
+            echo ""
+            read -p "Enable FCC unlock for this device? (y/N): " confirm
+            
+            if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                log_info "Creating unlock directory..."
+                sudo mkdir -p "$enabled_dir"
+                
+                log_info "Enabling FCC unlock..."
+                if sudo ln -sf "$available_dir/$matching_script" "$enabled_dir/$matching_script"; then
+                    log_ok "FCC unlock enabled"
+                    echo ""
+                    log_info "Restarting ModemManager..."
+                    sudo systemctl restart ModemManager
+                    sleep 3
+                    log_ok "Done. Try connecting now (option 1)"
+                else
+                    log_error "Failed to create symlink"
+                fi
+            else
+                echo "Cancelled"
+            fi
+            read -p "Press Enter..."
+            return 0
+        else
+            log_warn "No matching unlock script found for $vid_pid"
+            echo ""
+        fi
+    else
+        log_warn "Could not auto-detect device ID"
+        echo ""
+    fi
+    
+    # Manual selection
+    echo "Available unlock scripts:"
+    echo ""
+    local i=1
+    for script in "${scripts[@]}"; do
+        echo "  $i) $script"
+        ((i++))
+    done
+    echo "  0) Cancel"
+    echo ""
+    
+    read -p "Select script to enable [0-${#scripts[@]}]: " selection
+    
+    if [[ ! "$selection" =~ ^[0-9]+$ ]] || [ "$selection" -lt 1 ] || [ "$selection" -gt "${#scripts[@]}" ]; then
+        echo "Cancelled"
+        read -p "Press Enter..."
+        return 0
+    fi
+    
+    local selected_script="${scripts[$((selection-1))]}"
+    
+    log_info "Creating unlock directory..."
+    sudo mkdir -p "$enabled_dir"
+    
+    log_info "Enabling FCC unlock for $selected_script..."
+    if sudo ln -sf "$available_dir/$selected_script" "$enabled_dir/$selected_script"; then
+        log_ok "FCC unlock enabled"
+        echo ""
+        log_info "Restarting ModemManager..."
+        sudo systemctl restart ModemManager
+        sleep 3
+        log_ok "Done. Try connecting now (option 1)"
+    else
+        log_error "Failed to create symlink"
+    fi
+    
+    echo ""
+    read -p "Press Enter..."
+}
+
+disable_fcc_unlock() {
+    clear
+    echo "╔════════════════════════════════════╗"
+    echo "║      DISABLE FCC UNLOCK            ║"
+    echo "╚════════════════════════════════════╝"
+    echo ""
+    
+    local enabled_dir="/etc/ModemManager/fcc-unlock.d"
+    
+    if [ ! -d "$enabled_dir" ]; then
+        log_warn "FCC unlock directory not found"
+        read -p "Press Enter..."
+        return 0
+    fi
+    
+    local enabled_scripts=()
+    while IFS= read -r script; do
+        enabled_scripts+=("$script")
+    done < <(ls "$enabled_dir" 2>/dev/null)
+    
+    if [ ${#enabled_scripts[@]} -eq 0 ]; then
+        log_warn "No FCC unlock scripts are enabled"
+        read -p "Press Enter..."
+        return 0
+    fi
+    
+    echo "Enabled unlock scripts:"
+    echo ""
+    local i=1
+    for script in "${enabled_scripts[@]}"; do
+        echo "  $i) $script"
+        ((i++))
+    done
+    echo "  0) Cancel"
+    echo ""
+    
+    read -p "Select script to disable [0-${#enabled_scripts[@]}]: " selection
+    
+    if [[ ! "$selection" =~ ^[0-9]+$ ]] || [ "$selection" -lt 1 ] || [ "$selection" -gt "${#enabled_scripts[@]}" ]; then
+        echo "Cancelled"
+        read -p "Press Enter..."
+        return 0
+    fi
+    
+    local selected_script="${enabled_scripts[$((selection-1))]}"
+    
+    log_info "Disabling FCC unlock for $selected_script..."
+    if sudo rm -f "$enabled_dir/$selected_script"; then
+        log_ok "FCC unlock disabled"
+        echo ""
+        log_info "Restarting ModemManager..."
+        sudo systemctl restart ModemManager
+        sleep 2
+        log_ok "Done"
+    else
+        log_error "Failed to remove symlink"
+    fi
+    
+    echo ""
+    read -p "Press Enter..."
+}
+
+fcc_unlock_menu() {
+    while true; do
+        clear
+        echo "╔════════════════════════════════════╗"
+        echo "║      FCC UNLOCK MANAGEMENT         ║"
+        echo "╚════════════════════════════════════╝"
+        echo ""
+        echo "  Some Qualcomm/Intel modems require FCC unlock"
+        echo "  to enable RF functionality (online mode)."
+        echo ""
+        echo "  Affected models:"
+        echo "    • Quectel EM120"
+        echo "    • Foxconn SDX55"
+        echo "    • Fibocom L860"
+        echo ""
+        echo "  1) Check FCC Lock Status"
+        echo "  2) Enable FCC Unlock"
+        echo "  3) Disable FCC Unlock"
+        echo "  0) Back"
+        echo ""
+        read -p "Select option: " choice
+        
+        case $choice in
+            1) check_fcc_lock_status ;;
+            2) enable_fcc_unlock ;;
+            3) disable_fcc_unlock ;;
+            0) break ;;
+            *) echo -e "${RED}Invalid option${NC}"; sleep 1 ;;
+        esac
+    done
+}
+
 show_menu() {
     clear
     echo -e "${CYAN}Mobile Modem Manager v${VERSION}${NC} | ${CYAN}Murr${NC} @ ${CYAN}github.com/vtstv${NC}"
@@ -1077,6 +1414,7 @@ show_menu() {
     echo "  ADVANCED"
     echo " 10) Connection Management"
     echo " 11) eSIM Management"
+    echo " 12) FCC Unlock (Qualcomm/Intel)"
     echo ""
     echo "  0) Exit"
     echo ""
@@ -1094,6 +1432,7 @@ show_menu() {
         9) unlock_service_menu ;;
         10) connection_menu ;;
         11) esim_menu ;;
+        12) fcc_unlock_menu ;;
         0) clear; exit 0 ;;
         *) echo -e "${RED}[ERROR] Invalid option${NC}"; sleep 1 ;;
     esac
