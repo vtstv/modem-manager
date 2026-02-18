@@ -1,12 +1,4 @@
 #!/bin/bash
-#
-# ███╗   ███╗ ██████╗ ██████╗ ███████╗███╗   ███╗    ███╗   ███╗ █████╗ ███╗   ██╗ █████╗  ██████╗ ███████╗██████╗ 
-# ████╗ ████║██╔═══██╗██╔══██╗██╔════╝████╗ ████║    ████╗ ████║██╔══██╗████╗  ██║██╔══██╗██╔════╝ ██╔════╝██╔══██╗
-# ██╔████╔██║██║   ██║██║  ██║█████╗  ██╔████╔██║    ██╔████╔██║███████║██╔██╗ ██║███████║██║  ███╗█████╗  ██████╔╝
-# ██║╚██╔╝██║██║   ██║██║  ██║██╔══╝  ██║╚██╔╝██║    ██║╚██╔╝██║██╔══██║██║╚██╗██║██╔══██║██║   ██║██╔══╝  ██╔══██╗
-# ██║ ╚═╝ ██║╚██████╔╝██████╔╝███████╗██║ ╚═╝ ██║    ██║ ╚═╝ ██║██║  ██║██║ ╚████║██║  ██║╚██████╔╝███████╗██║  ██║
-# ╚═╝     ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝╚═╝     ╚═╝    ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝
-#
 # Mobile Modem Manager - Interactive GSM/LTE/eSIM Management Tool
 # Version: 1.2
 # Author: Murr
@@ -34,35 +26,231 @@ show_copyright() {
     sleep 1
 }
 
+# Detect the Linux distribution and set package manager info
+detect_distro() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        DISTRO_ID="${ID,,}"
+        DISTRO_ID_LIKE="${ID_LIKE,,}"
+    else
+        DISTRO_ID=""
+        DISTRO_ID_LIKE=""
+    fi
+
+    # Arch-based (Arch, Manjaro, EndeavourOS, Garuda, etc.)
+    if [ -f /etc/arch-release ] || echo "$DISTRO_ID $DISTRO_ID_LIKE" | grep -qw "arch"; then
+        PKG_MANAGER="pacman"
+        PKG_INSTALL="sudo pacman -S --noconfirm"
+        PKG_UPDATE=""
+        # package name map: tool -> package
+        declare -gA PKG_MAP=(
+            [mmcli]="modemmanager"
+            [nmcli]="networkmanager"
+            [systemctl]="systemd"
+            [systemd-creds]="systemd"
+            [sudo]="sudo"
+            [ping]="iputils"
+        )
+        DISTRO_LABEL="Arch Linux"
+
+    # Debian/Ubuntu-based
+    elif [ -f /etc/debian_version ] || echo "$DISTRO_ID $DISTRO_ID_LIKE" | grep -qwE "debian|ubuntu"; then
+        PKG_MANAGER="apt"
+        PKG_INSTALL="sudo apt install -y"
+        PKG_UPDATE="sudo apt update"
+        declare -gA PKG_MAP=(
+            [mmcli]="modemmanager"
+            [nmcli]="network-manager"
+            [systemctl]="systemd"
+            [systemd-creds]="systemd"
+            [sudo]="sudo"
+            [ping]="iputils-ping"
+        )
+        DISTRO_LABEL="Debian/Ubuntu"
+
+    # Fedora / RHEL / CentOS / Rocky / AlmaLinux
+    elif echo "$DISTRO_ID $DISTRO_ID_LIKE" | grep -qwE "fedora|rhel|centos|rocky|alma|redhat"; then
+        if command -v dnf >/dev/null 2>&1; then
+            PKG_MANAGER="dnf"
+            PKG_INSTALL="sudo dnf install -y"
+            PKG_UPDATE=""
+        else
+            PKG_MANAGER="yum"
+            PKG_INSTALL="sudo yum install -y"
+            PKG_UPDATE=""
+        fi
+        declare -gA PKG_MAP=(
+            [mmcli]="ModemManager"
+            [nmcli]="NetworkManager"
+            [systemctl]="systemd"
+            [systemd-creds]="systemd"
+            [sudo]="sudo"
+            [ping]="iputils"
+        )
+        DISTRO_LABEL="Fedora/RHEL"
+
+    # openSUSE / SUSE
+    elif echo "$DISTRO_ID $DISTRO_ID_LIKE" | grep -qwE "suse|opensuse"; then
+        PKG_MANAGER="zypper"
+        PKG_INSTALL="sudo zypper install -y"
+        PKG_UPDATE=""
+        declare -gA PKG_MAP=(
+            [mmcli]="ModemManager"
+            [nmcli]="NetworkManager"
+            [systemctl]="systemd"
+            [systemd-creds]="systemd"
+            [sudo]="sudo"
+            [ping]="iputils"
+        )
+        DISTRO_LABEL="openSUSE/SUSE"
+
+    else
+        PKG_MANAGER=""
+        PKG_INSTALL=""
+        PKG_UPDATE=""
+        declare -gA PKG_MAP=()
+        DISTRO_LABEL="Unknown"
+    fi
+}
+
 # Check and install dependencies
 check_dependencies() {
-    local missing=()
-    
-    command -v mmcli >/dev/null 2>&1 || missing+=("modemmanager")
-    command -v nmcli >/dev/null 2>&1 || missing+=("networkmanager")
-    
-    if [ ${#missing[@]} -eq 0 ]; then
+    detect_distro
+
+    # Map: binary -> human-readable description
+    declare -A DEP_DESC=(
+        [mmcli]="ModemManager CLI (mmcli)"
+        [nmcli]="NetworkManager CLI (nmcli)"
+        [systemctl]="systemd (systemctl)"
+        [systemd-creds]="systemd credentials (systemd-creds)"
+        [sudo]="sudo"
+        [ping]="ping (iputils)"
+    )
+
+    local missing_bins=()
+    local missing_pkgs=()
+    local seen_pkgs=()
+
+    for bin in mmcli nmcli systemctl systemd-creds sudo ping; do
+        if ! command -v "$bin" >/dev/null 2>&1; then
+            missing_bins+=("$bin")
+            local pkg="${PKG_MAP[$bin]:-$bin}"
+            # Avoid duplicate package names
+            if [[ ! " ${seen_pkgs[*]} " =~ " ${pkg} " ]]; then
+                missing_pkgs+=("$pkg")
+                seen_pkgs+=("$pkg")
+            fi
+        fi
+    done
+
+    # ── All good ──────────────────────────────────────────────────────────────
+    if [ ${#missing_bins[@]} -eq 0 ]; then
+        # Check if services need to be started (ask user first)
+        _ensure_services_running
         return 0
     fi
-    
-    echo -e "${YELLOW}[!] Missing packages: ${missing[*]}${NC}"
-    read -p "Install missing packages? (y/n): " install
-    
-    [ "$install" != "y" ] && echo -e "${RED}[ERROR] Cannot continue without required packages${NC}" && exit 1
-    
-    if [ -f /etc/arch-release ]; then
-        echo -e "${BLUE}[*] Installing on Arch Linux...${NC}"
-        sudo pacman -S --noconfirm "${missing[@]}"
-    elif [ -f /etc/debian_version ]; then
-        echo -e "${BLUE}[*] Installing on Debian/Ubuntu...${NC}"
-        sudo apt update
-        sudo apt install -y "${missing[@]}"
-    else
-        echo -e "${RED}[ERROR] Unsupported distribution. Install manually: ${missing[*]}${NC}"
+
+    # ── Report missing deps ───────────────────────────────────────────────────
+    echo ""
+    echo -e "${RED}╔════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${RED}║              MISSING DEPENDENCIES DETECTED                 ║${NC}"
+    echo -e "${RED}╚════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${YELLOW}  The following required tools are not installed:${NC}"
+    echo ""
+    for bin in "${missing_bins[@]}"; do
+        echo -e "    ${RED}✗${NC}  ${DEP_DESC[$bin]:-$bin}"
+    done
+    echo ""
+
+    if [ -z "$PKG_MANAGER" ]; then
+        echo -e "${RED}[ERROR] Unsupported distribution ($DISTRO_LABEL).${NC}"
+        echo -e "${YELLOW}        Please install the following packages manually:${NC}"
+        for pkg in "${missing_pkgs[@]}"; do
+            echo -e "          - $pkg"
+        done
+        echo ""
         exit 1
     fi
-    
-    echo -e "${GREEN}[OK] Dependencies installed${NC}"
+
+    echo -e "${BLUE}  Detected distribution : ${NC}${DISTRO_LABEL}"
+    echo -e "${BLUE}  Package manager       : ${NC}${PKG_MANAGER}"
+    echo -e "${BLUE}  Packages to install   : ${NC}${missing_pkgs[*]}"
+    echo ""
+    read -p "  Install missing packages now? (y/n): " do_install
+    echo ""
+
+    if [ "$do_install" != "y" ] && [ "$do_install" != "Y" ]; then
+        echo -e "${RED}[ERROR] Cannot continue without required packages. Exiting.${NC}"
+        exit 1
+    fi
+
+    # ── Run package manager update if needed ─────────────────────────────────
+    if [ -n "$PKG_UPDATE" ]; then
+        echo -e "${BLUE}[*] Updating package lists...${NC}"
+        if ! eval "$PKG_UPDATE"; then
+            echo -e "${RED}[ERROR] Failed to update package lists.${NC}"
+            exit 1
+        fi
+    fi
+
+    # ── Install missing packages ──────────────────────────────────────────────
+    echo -e "${BLUE}[*] Installing on ${DISTRO_LABEL}...${NC}"
+    if ! eval "$PKG_INSTALL ${missing_pkgs[*]}"; then
+        echo -e "${RED}[ERROR] Package installation failed. Please install manually:${NC}"
+        for pkg in "${missing_pkgs[@]}"; do
+            echo -e "          - $pkg"
+        done
+        exit 1
+    fi
+
+    echo ""
+    echo -e "${GREEN}[OK] All dependencies installed successfully.${NC}"
+    echo ""
+
+    # ── Enable & start services after install (ask user) ─────────────────────
+    _ensure_services_running
+
+    sleep 2
+}
+
+# Check if ModemManager / NetworkManager are running; ask user before starting
+_ensure_services_running() {
+    local services=("ModemManager" "NetworkManager")
+    local stopped_svcs=()
+
+    for svc in "${services[@]}"; do
+        if ! systemctl is-active --quiet "$svc" 2>/dev/null; then
+            stopped_svcs+=("$svc")
+        fi
+    done
+
+    [ ${#stopped_svcs[@]} -eq 0 ] && return 0
+
+    echo ""
+    echo -e "${YELLOW}  The following required services are not running:${NC}"
+    for svc in "${stopped_svcs[@]}"; do
+        echo -e "    ${YELLOW}⚠${NC}  $svc"
+    done
+    echo ""
+    read -p "  Enable and start these services now? (y/n): " do_start
+    echo ""
+
+    if [ "$do_start" != "y" ] && [ "$do_start" != "Y" ]; then
+        echo -e "${YELLOW}[!] Services not started. Some features may not work.${NC}"
+        sleep 2
+        return 0
+    fi
+
+    for svc in "${stopped_svcs[@]}"; do
+        echo -e "${BLUE}[*] Enabling and starting ${svc}...${NC}"
+        if sudo systemctl enable --now "$svc" 2>/dev/null; then
+            echo -e "${GREEN}[OK] ${svc} started.${NC}"
+        else
+            echo -e "${YELLOW}[!] Could not start ${svc}.${NC}"
+        fi
+    done
+
     sleep 2
 }
 
@@ -77,22 +265,42 @@ get_sim_id() {
 }
 
 list_gsm_connections() {
-    nmcli -t -f NAME,TYPE connection show | grep gsm | cut -d: -f1
+    nmcli -t -f NAME,TYPE connection show | grep ":gsm" | cut -d: -f1
 }
 
 select_connection() {
-    local connections=($(list_gsm_connections))
+    # NOTE: This function prints the chosen connection name to stdout.
+    # All interactive prompts MUST go to stderr so callers using $() capture
+    # only the connection name and not menu text.
+    local connections=()
+    while IFS= read -r line; do
+        connections+=("$line")
+    done < <(list_gsm_connections)
+
     if [ ${#connections[@]} -eq 0 ]; then
-        echo "No GSM connections found"
+        echo -e "${YELLOW}[!] No GSM connections found. Create one via Connection Management (option 10).${NC}" >&2
         return 1
     elif [ ${#connections[@]} -eq 1 ]; then
         echo "${connections[0]}"
         return 0
     fi
-    
-    echo "Select connection:"
-    select conn in "${connections[@]}"; do
-        [ -n "$conn" ] && echo "$conn" && return 0
+
+    # Multiple connections — show a numbered menu on stderr, read choice
+    echo -e "${CYAN}  Available GSM connections:${NC}" >&2
+    local i=1
+    for conn in "${connections[@]}"; do
+        echo "  $i) $conn" >&2
+        (( i++ ))
+    done
+    echo "" >&2
+
+    while true; do
+        read -p "  Select connection [1-${#connections[@]}]: " sel >&2 2>&1
+        if [[ "$sel" =~ ^[0-9]+$ ]] && [ "$sel" -ge 1 ] && [ "$sel" -le "${#connections[@]}" ]; then
+            echo "${connections[$((sel-1))]}"
+            return 0
+        fi
+        echo -e "${RED}  [ERROR] Invalid selection.${NC}" >&2
     done
 }
 
@@ -117,17 +325,30 @@ show_status() {
 modem_up() {
     MODEM=$(get_modem_id)
     [ -z "$MODEM" ] && echo -e "${RED}[ERROR] No modem found${NC}" && read -p "Press Enter..." && return 1
-    
-    echo -e "${BLUE}[*] Enabling modem...${NC}"
-    sudo mmcli -m "$MODEM" -e
+
+    echo -e "${BLUE}[*] Enabling modem $MODEM...${NC}"
+    if ! sudo mmcli -m "$MODEM" -e; then
+        echo -e "${YELLOW}[!] Could not enable modem (may already be enabled, continuing...)${NC}"
+    fi
     sleep 2
-    
+
     CONNECTION=$(select_connection)
-    [ -z "$CONNECTION" ] && read -p "Press Enter..." && return 1
-    
-    echo -e "${BLUE}[*] Connecting to $CONNECTION...${NC}"
-    sudo nmcli connection up "$CONNECTION"
-    echo -e "${GREEN}[OK] Done${NC}"
+    if [ -z "$CONNECTION" ]; then
+        read -p "Press Enter..."
+        return 1
+    fi
+
+    echo -e "${BLUE}[*] Bringing up connection '$CONNECTION'...${NC}"
+    if sudo nmcli connection up "$CONNECTION"; then
+        echo -e "${GREEN}[OK] Connected successfully.${NC}"
+    else
+        echo -e "${RED}[ERROR] Failed to bring up connection '$CONNECTION'.${NC}"
+        echo -e "${YELLOW}[!] Possible causes:${NC}"
+        echo -e "      - SIM PIN not unlocked (use option 7 → Unlock PIN)"
+        echo -e "      - Wrong APN (use option 10 → Modify Connection)"
+        echo -e "      - Modem not registered to network (check signal: option 4)"
+        echo -e "      - Run Full Diagnostics (option 5) for details"
+    fi
     read -p "Press Enter..."
 }
 
@@ -387,17 +608,52 @@ create_connection() {
     echo "╔════════════════════════════════════╗"
     echo "║      CREATE GSM CONNECTION         ║"
     echo "╚════════════════════════════════════╝"
-    
-    read -p "Connection name: " NAME
-    read -p "APN (e.g., web.vodafone.de): " APN
-    read -p "PIN (optional, press Enter to skip): " PIN
-    
-    echo -e "${BLUE}[*] Creating connection...${NC}"
-    sudo nmcli connection add type gsm ifname '*' con-name "$NAME" apn "$APN" connection.autoconnect yes
-    
-    [ -n "$PIN" ] && sudo nmcli connection modify "$NAME" gsm.pin "$PIN"
-    
-    echo -e "${GREEN}[OK] Connection '$NAME' created${NC}"
+    echo ""
+
+    # Validate name
+    while true; do
+        read -p "  Connection name: " NAME
+        [ -n "$NAME" ] && break
+        echo -e "${RED}  [ERROR] Name cannot be empty.${NC}"
+    done
+
+    # Validate APN
+    while true; do
+        read -p "  APN (e.g., internet, web.vodafone.de): " APN
+        [ -n "$APN" ] && break
+        echo -e "${RED}  [ERROR] APN cannot be empty.${NC}"
+    done
+
+    read -p "  Username (optional, press Enter to skip): " USR
+    read -sp "  Password (optional, press Enter to skip): " PASS
+    echo ""
+    read -sp "  SIM PIN (optional, press Enter to skip): " PIN
+    echo ""
+    echo ""
+
+    echo -e "${BLUE}[*] Creating GSM connection '$NAME'...${NC}"
+
+    # Build the nmcli command — ifname '*' lets NM pick the modem device
+    local cmd="sudo nmcli connection add type gsm ifname '*' con-name \"$NAME\" gsm.apn \"$APN\" connection.autoconnect yes"
+    [ -n "$USR" ]  && cmd+=" gsm.username \"$USR\""
+    [ -n "$PASS" ] && cmd+=" gsm.password \"$PASS\""
+
+    if ! eval "$cmd"; then
+        echo -e "${RED}[ERROR] Failed to create connection.${NC}"
+        echo -e "${YELLOW}[!] Make sure ModemManager and NetworkManager are running.${NC}"
+        read -p "Press Enter..."
+        return 1
+    fi
+
+    # Store PIN separately (avoids it appearing in process list)
+    if [ -n "$PIN" ]; then
+        if ! sudo nmcli connection modify "$NAME" gsm.pin "$PIN"; then
+            echo -e "${YELLOW}[!] Connection created but failed to store PIN.${NC}"
+        fi
+    fi
+
+    echo -e "${GREEN}[OK] Connection '$NAME' created successfully.${NC}"
+    echo -e "${BLUE}[*] Use option 1 (Connect) to bring it up.${NC}"
     read -p "Press Enter..."
 }
 

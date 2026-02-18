@@ -26,23 +26,29 @@ Interactive bash tool for managing GSM/LTE/eSIM modems on Linux.
 - Install new eSIM profiles via activation code
 - Delete eSIM profiles
 
-### Automatic SIM Unlock 
+### Automatic SIM Unlock
 - Encrypted PIN storage using systemd credentials
 - Automatic SIM unlock on boot via systemd service
 - Secure credential management (no plain-text PIN)
 - Easy install/uninstall/status management
 
-### System Integration
-- Auto-install dependencies (ModemManager, NetworkManager)
-- Supports Arch/CachyOS Linux and Debian/Ubuntu
-- Interactive menu-driven interface
+### Dependency Management
+- Automatically detects missing dependencies on startup
+- Identifies your Linux distribution and package manager
+- Prompts user before installing anything — nothing runs silently
+- Prompts user before enabling/starting system services
+- Supports **Arch Linux**, **Debian/Ubuntu**, **Fedora/RHEL/CentOS/Rocky/AlmaLinux**, and **openSUSE/SUSE**
+- Shows manual install instructions for unsupported distributions
 
-## Requirements
+## Supported Distributions
 
-- ModemManager
-- NetworkManager
-- systemd (for automatic unlock feature)
-- Arch Linux, Debian, or Ubuntu
+| Distribution Family | Examples | Package Manager |
+|---|---|---|
+| Arch-based | Arch Linux, Manjaro, EndeavourOS, Garuda, CachyOS | `pacman` |
+| Debian-based | Debian, Ubuntu, Linux Mint, Pop!_OS, Kali | `apt` |
+| Fedora/RHEL-based | Fedora, RHEL, CentOS, Rocky Linux, AlmaLinux | `dnf` / `yum` |
+| SUSE-based | openSUSE Leap, openSUSE Tumbleweed, SLES | `zypper` |
+
 
 ## Installation
 
@@ -51,10 +57,13 @@ chmod +x modem-manager.sh
 ./modem-manager.sh
 ```
 
-Dependencies will be automatically installed on first run if missing.
+On first run, if any dependencies are missing the script will:
+1. Show exactly which tools are missing
+2. Show which packages will be installed and via which package manager
+3. **Ask for confirmation before installing anything**
+4. After installation, ask before enabling/starting required services (ModemManager, NetworkManager)
 
 ## Usage
-
 
 ```bash
 # From Auto Unlock Service menu:
@@ -71,8 +80,7 @@ Dependencies will be automatically installed on first run if missing.
 
 ## Version
 
-**v1.2** - Reorganized menu structure, added automatic SIM unlock with encrypted credentials
-
+**v1.2** - Reorganized menu structure, added automatic SIM unlock with encrypted credentials, expanded distro support (Fedora/RHEL, openSUSE), user-confirmed dependency installation
 
 ## License
 
